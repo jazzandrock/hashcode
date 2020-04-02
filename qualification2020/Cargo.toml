@@ -1,0 +1,18 @@
+[package]
+name = "qualification2020"
+version = "0.1.0"
+authors = ["Oleg Syniakevych <olegsyniakevych@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "lib"
+path = "src/lib.rs"
+
+[dependencies]
+helpers = { path = "../helpers", version = "0.1.0" }
+rand = "0.7.3"
+env_logger = "0.7.1"
+log = "0.4.8"
+threadpool = "1.7.1"

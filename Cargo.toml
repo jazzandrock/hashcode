@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "qualification2020"
+]
+
+[profile.release]
+debug = true
