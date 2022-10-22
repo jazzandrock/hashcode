@@ -1,0 +1,15 @@
+[package]
+name = "qualification2019"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "lib"
+path = "src/lib.rs"
+
+[dependencies]
+helpers = { path = "../helpers", version = "0.1.0" }
+rand = "0.7.3"
+env_logger = "0.7.1"
+log = "0.4.8"
+threadpool = "1.8.1"

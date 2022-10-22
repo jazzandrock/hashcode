@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "qualification2020",
+    "qualification2019",
     "qualification2018"
 ]
 
