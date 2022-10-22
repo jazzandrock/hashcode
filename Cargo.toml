@@ -1,6 +1,7 @@
 [workspace]
 members = [
-    "qualification2020"
+    "qualification2020",
+    "qualification2018"
 ]
 
 [profile.release]
