@@ -213,10 +213,10 @@ fn solve_annealing_all_horizontal(in_file: &str, out_file: &str) -> Result<(), B
         total_score += get_score(prev_slide, curr_slide) as i64;
     }
 
-    let n_iterations_per_t = 50;
+    let n_iterations_per_t = 10;
     let mut temperature = 10.0;
     let init_temperature = temperature;
-    let cooldown = 0.999999;
+    let cooldown = 0.999999999;
 
     let time_start = Instant::now();
     let mut last_time_printed = Instant::now();
@@ -226,11 +226,16 @@ fn solve_annealing_all_horizontal(in_file: &str, out_file: &str) -> Result<(), B
     let mut avg_prob = 0.0;
     let mut n_delta = 0;
 
+    let mut max_prob = 0.0;
+    let mut max_delta = i32::MIN;
+    let mut min_prob = 1.0;
+    let mut min_delta = i32::MAX;
+
     let mut max_score = total_score;
     let mut max_score_temp = temperature;
 
     let mut total_iterations = 0;
-    while temperature > 0.0001 {
+    while temperature > 0.001 {
         let (delta, id1, id2) = {
             let mut best_score_swap = (i32::MIN, 0, 0);
             for _ in 0..n_iterations_per_t {
@@ -246,20 +251,16 @@ fn solve_annealing_all_horizontal(in_file: &str, out_file: &str) -> Result<(), B
                 let mut delta_score = 0i32;
                 for (id1, id2) in [(id1, id2), (id2, id1)] {
                     // when we remove the image from slideshow, we lose scores for 1 or 2 transitions
+                    let curr_slide = &images[res[id1]].tags;
+                    let new_curr_slide = &images[res[id2]].tags;
                     if id1 > 0 {
                         let prev_slide = &images[res[id1 - 1]].tags;
-                        let curr_slide = &images[res[id1]].tags;
                         delta_score -= get_score(prev_slide, curr_slide) as i32;
-                
-                        let new_curr_slide = &images[res[id2]].tags;
                         delta_score += get_score(prev_slide, new_curr_slide) as i32;
                     }
                     if id1 < n_images - 1 {
-                        let curr_slide = &images[res[id1]].tags;
                         let next_slide = &images[res[id1 + 1]].tags;
                         delta_score -= get_score(curr_slide, next_slide) as i32;
-                
-                        let new_curr_slide = &images[res[id2]].tags;
                         delta_score += get_score(new_curr_slide, next_slide) as i32;
                     }
                 }
@@ -292,12 +293,19 @@ fn solve_annealing_all_horizontal(in_file: &str, out_file: &str) -> Result<(), B
             max_score = total_score;
             max_score_temp = temperature;
         }
+        max_delta = std::cmp::max(max_delta, delta);
+        if max_prob < prob { max_prob = prob }
+
+        min_delta = std::cmp::min(min_delta, delta);
+        if min_prob > prob { min_prob = prob }
 
         if last_time_printed.elapsed().as_millis() > 100 {
-            print!("\x1B[2J\x1B[1;1H");
+            print!("\x1B[2J\x1B[1;1H"); // clears the console
             println!("Time running: {}, n iterations: {}", time_start.elapsed().as_secs(), total_iterations);
             println!("Avg delta: {}", avg_delta as f64 / n_delta as f64);
             println!("Avg prob: {}", avg_prob as f64 / n_delta as f64);
+            println!("max delta: {}, max prob: {}", max_delta, max_prob);
+            println!("min delta: {}, min prob: {}", min_delta, min_prob);
             println!("Init T: {}, cooldown: {}, n_iterations: {}", init_temperature, cooldown, n_iterations_per_t);
             println!("Score: {}", total_score);
             println!("Delta: {}", delta);
@@ -309,6 +317,12 @@ fn solve_annealing_all_horizontal(in_file: &str, out_file: &str) -> Result<(), B
             avg_delta = 0;
             n_delta = 0;
             avg_prob = 0.0;
+
+            max_prob = 0.0;
+            max_delta = i32::MIN;
+
+            min_prob = 1.0;
+            min_delta = i32::MAX;
         }
 
         temperature *= cooldown;
