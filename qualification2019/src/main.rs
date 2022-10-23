@@ -5,6 +5,7 @@
  */
 
 use lib::*;
+use rand::seq::SliceRandom;
 use threadpool::ThreadPool;
 
 use std::collections::HashMap;
@@ -21,9 +22,17 @@ use std::io::Read;
 use helpers::red::Red;
 
 use bit_set::BitSet;
+use rand::Rng; // 0.8.5
+
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
+
+    // a num H: 2, V: 2
+    // b num H: 80000, V: 0
+    // c num H: 500, V: 500
+    // d num H: 30000, V: 60000
+    // e num H: 0, V: 80000
 
     // a: 2
     // c: 1764
@@ -32,11 +41,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // e: 549197
     // total 962989
     let files = [
-        ("./input/a.txt", "./output/a.txt"),
+        // ("./input/a.txt", "./output/a.txt"),
         ("./input/b.txt", "./output/b.txt"),
-        ("./input/c.txt", "./output/c.txt"),
-        ("./input/d.txt", "./output/d.txt"),
-        ("./input/e.txt", "./output/e.txt"),
+        // ("./input/b_cut.txt", "./output/b_cut.txt"),
+        // ("./input/a_all_horiz.txt", "./output/a_all_horiz.txt"),
+        // ("./input/c.txt", "./output/c.txt"),
+        // ("./input/d.txt", "./output/d.txt"),
+        // ("./input/e.txt", "./output/e.txt"),
     ];
 
     let args = std::env::args().collect::<Vec<_>>();
@@ -56,7 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for (in_file, out_file) in files {
                 pool.execute(move || {
                     let timer = Instant::now();
-                    solve(in_file, out_file).unwrap();
+                    solve_annealing_all_horizontal(in_file, out_file).unwrap();
                     println!("{} time: {}", in_file, timer.elapsed().as_millis());
                 })
             }
@@ -182,27 +193,163 @@ fn outer_join(a: &[u32], b: &[u32]) -> Vec<u32> {
     result
 }
 
+fn solve_annealing_all_horizontal(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut input = read_problem(in_file);
+    let mut n_images = input.n_images as usize;
+    let mut all_tags = input.all_tags;
+    let mut images = input.images;
+
+    let mut rng = rand::thread_rng();
+
+    // first, generate random permutation of our images — that would be our initial state
+    let mut res = (0..n_images).collect::<Vec<_>>();
+    res.shuffle(&mut rng);
+
+    // now, compute the score for it
+    let mut total_score = 0i64;
+    for i in 1..res.len() {
+        let prev_slide = &images[res[i - 1]].tags;
+        let curr_slide = &images[res[i]].tags;
+        total_score += get_score(prev_slide, curr_slide) as i64;
+    }
+
+    let n_iterations_per_t = 50;
+    let mut temperature = 10.0;
+    let init_temperature = temperature;
+    let cooldown = 0.999999;
+
+    let time_start = Instant::now();
+    let mut last_time_printed = Instant::now();
+    // last_time_printed.elapsed().as_millis()
+
+    let mut avg_delta = 0;
+    let mut avg_prob = 0.0;
+    let mut n_delta = 0;
+
+    let mut max_score = total_score;
+    let mut max_score_temp = temperature;
+
+    let mut total_iterations = 0;
+    while temperature > 0.0001 {
+        let (delta, id1, id2) = {
+            let mut best_score_swap = (i32::MIN, 0, 0);
+            for _ in 0..n_iterations_per_t {
+                // now choose two images that we swap
+                let mut id1 = rng.gen_range(0, n_images);
+                let mut id2 = rng.gen_range(0, n_images);
+                
+                // totally unnecessary
+                if id1 > id2 {
+                    (id1, id2) = (id2, id1);
+                }
+        
+                let mut delta_score = 0i32;
+                for (id1, id2) in [(id1, id2), (id2, id1)] {
+                    // when we remove the image from slideshow, we lose scores for 1 or 2 transitions
+                    if id1 > 0 {
+                        let prev_slide = &images[res[id1 - 1]].tags;
+                        let curr_slide = &images[res[id1]].tags;
+                        delta_score -= get_score(prev_slide, curr_slide) as i32;
+                
+                        let new_curr_slide = &images[res[id2]].tags;
+                        delta_score += get_score(prev_slide, new_curr_slide) as i32;
+                    }
+                    if id1 < n_images - 1 {
+                        let curr_slide = &images[res[id1]].tags;
+                        let next_slide = &images[res[id1 + 1]].tags;
+                        delta_score -= get_score(curr_slide, next_slide) as i32;
+                
+                        let new_curr_slide = &images[res[id2]].tags;
+                        delta_score += get_score(new_curr_slide, next_slide) as i32;
+                    }
+                }
+        
+                best_score_swap = std::cmp::max(best_score_swap, (delta_score, id1, id2));
+            }
+    
+            best_score_swap
+        };
+
+        total_iterations += 1;
+
+        avg_delta += delta;
+        n_delta += 1;
+
+        let mut improper_probs = Vec::new();
+        let mut prob = 1.0 / (1.0 + (-delta as f64 / temperature).exp());
+        if !prob.is_finite() || prob > 1.0 {
+            improper_probs.push(prob);
+            prob = 1.0;
+        }
+        avg_prob += prob;
+        let take = rng.gen_bool(prob);
+        if take {
+            res.swap(id1, id2);
+            total_score += delta as i64;
+        }
+
+        if total_score > max_score {
+            max_score = total_score;
+            max_score_temp = temperature;
+        }
+
+        if last_time_printed.elapsed().as_millis() > 100 {
+            print!("\x1B[2J\x1B[1;1H");
+            println!("Time running: {}, n iterations: {}", time_start.elapsed().as_secs(), total_iterations);
+            println!("Avg delta: {}", avg_delta as f64 / n_delta as f64);
+            println!("Avg prob: {}", avg_prob as f64 / n_delta as f64);
+            println!("Init T: {}, cooldown: {}, n_iterations: {}", init_temperature, cooldown, n_iterations_per_t);
+            println!("Score: {}", total_score);
+            println!("Delta: {}", delta);
+            println!("Temperature: {}", temperature);
+            println!("prob: {}", prob);
+            println!("Max score {} at temp {}", max_score, max_score_temp);
+            println!("Improper probs: {:?}", &improper_probs);
+            last_time_printed = Instant::now();
+            avg_delta = 0;
+            n_delta = 0;
+            avg_prob = 0.0;
+        }
+
+        temperature *= cooldown;
+    }
+
+    // println!("score: {}, delta: {}, res: {:?}", score, delta_score, &res);
+
+    Ok(())
+}
+
 fn solve(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut input = read_problem(in_file);
     let mut n_images = input.n_images;
     let mut all_tags = input.all_tags;
     let mut images = input.images;
-    
+
     const NON_EXISTENT_IMG: u32 = u32::MAX;
 
     let mut solution = Vec::<(u32, u32)>::new();
     // later make this a random choice
-    match images.iter().find(|i| !i.vert).map(|i| i.id) {
-        Some(id) => {
+    {
+        let mut rng = rand::thread_rng();
+        let n_horiz_images = images.iter().filter(|i| !i.vert).count();
+        let n_vert_img = images.len() - n_horiz_images;
+        if n_horiz_images > 0 {
+            let id = rng.gen_range(0, n_horiz_images);
+            let id = images.iter().filter(|i| !i.vert).skip(id).last().map(|i| i.id).unwrap();
             solution.push((id, NON_EXISTENT_IMG));
             images[id as usize].used = true;
-        },
-        None => {
-            solution.push((0, 1));
-            images[0].used = true;
-            images[1].used = true;
-        },
-    };
+        } else {
+            let id1 = rng.gen_range(0, n_vert_img);
+            let mut id2 = id1;
+            while id2 == id1 {
+                id2 = rng.gen_range(0, n_vert_img);
+            }
+
+            solution.push((id1 as u32, id2 as u32));
+            images[id1 as usize].used = true;
+            images[id2 as usize].used = true;
+        }
+    }
 
     let mut total_score = 0;
     loop {
