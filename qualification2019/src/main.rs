@@ -340,28 +340,6 @@ fn solve_B(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Erro
     let mut all_tags = input.all_tags;
     let mut images = input.images;
 
-    let mut rng = rand::thread_rng();
-    // choose seed img
-    // let mut res = Vec::new();
-    // res.push(rng.gen_range(0, images.len()));
-
-    // let mut graph = vec![Vec::<(usize, i32)>::new(); images.len()];
-    // for i in 0..n_images as usize {
-    //     for j in i+1..n_images as usize {
-    //         let score = get_score(&images[i as usize].tags, &images[j as usize].tags); 
-    //         if score > 0 {
-    //             graph[i].push((j, score as i32));
-    //         }
-    //     }
-    //     if i & 1023 == 0 {
-    //         println!("len for img {}: {}", i, graph[i].len());
-    //     }
-    // }
-
-    // let mut out_file = BufWriter::new(File::create("b_graph.json")?);
-    // let strrr = serde_json::to_string(&graph)?;
-    // write!(&mut out_file, "{}", &strrr)?;
-
     let graph = {
         let file = std::fs::File::open("b_graph2.json".to_string());
         let file = std::io::BufReader::new(file.unwrap());
@@ -369,19 +347,27 @@ fn solve_B(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Erro
         graph
     };
 
-    // let mut graph2 = vec![Vec::<(usize, i32)>::new(); images.len()];
-    // for i in 0..graph.len() {
-    //     for &(j, score) in &graph[i] {
-    //         graph2[i].push((j, score));
-    //         graph2[j].push((i, score));
-    //     }
-    // }
-    // graph2.iter_mut().for_each(|v| v.sort());
+    let mut rng = rand::thread_rng();
+    // choose seed img
+    let mut res = Vec::with_capacity(images.len());
+    res.push(rng.gen_range(0, images.len()));
 
-    // let mut out_file = BufWriter::new(File::create("b_graph2.json")?);
-    // let strrr = serde_json::to_string(&graph2)?;
-    // write!(&mut out_file, "{}", &strrr)?;
+    let mut used = vec![false; images.len()];
+    used[res[0]] = true;
 
+    let mut total_score = 0i64;
+    loop {
+        let i = *res.last().unwrap();
+        if let Some(&(j, score)) = graph[i].iter().filter(|(j, score)| !used[*j]).max_by_key(|(j, score)| score) {
+            res.push(j);
+            used[j] = true;
+            total_score += score as i64;
+        } else {
+            break;
+        }
+    }
+
+    println!("score : {}", total_score);
 
     Ok(())
 }
