@@ -23,7 +23,7 @@ use helpers::red::Red;
 
 use bit_set::BitSet;
 use rand::Rng; // 0.8.5
-
+use serde_json;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
@@ -67,7 +67,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for (in_file, out_file) in files {
                 pool.execute(move || {
                     let timer = Instant::now();
-                    solve_annealing_all_horizontal(in_file, out_file).unwrap();
+                    // solve_annealing_all_horizontal(in_file, out_file).unwrap();
+                    solve_B(in_file, out_file).unwrap();
                     println!("{} time: {}", in_file, timer.elapsed().as_millis());
                 })
             }
@@ -329,6 +330,58 @@ fn solve_annealing_all_horizontal(in_file: &str, out_file: &str) -> Result<(), B
     }
 
     // println!("score: {}, delta: {}, res: {:?}", score, delta_score, &res);
+
+    Ok(())
+}
+
+fn solve_B(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut input = read_problem(in_file);
+    let mut n_images = input.n_images;
+    let mut all_tags = input.all_tags;
+    let mut images = input.images;
+
+    let mut rng = rand::thread_rng();
+    // choose seed img
+    // let mut res = Vec::new();
+    // res.push(rng.gen_range(0, images.len()));
+
+    // let mut graph = vec![Vec::<(usize, i32)>::new(); images.len()];
+    // for i in 0..n_images as usize {
+    //     for j in i+1..n_images as usize {
+    //         let score = get_score(&images[i as usize].tags, &images[j as usize].tags); 
+    //         if score > 0 {
+    //             graph[i].push((j, score as i32));
+    //         }
+    //     }
+    //     if i & 1023 == 0 {
+    //         println!("len for img {}: {}", i, graph[i].len());
+    //     }
+    // }
+
+    // let mut out_file = BufWriter::new(File::create("b_graph.json")?);
+    // let strrr = serde_json::to_string(&graph)?;
+    // write!(&mut out_file, "{}", &strrr)?;
+
+    let graph = {
+        let file = std::fs::File::open("b_graph2.json".to_string());
+        let file = std::io::BufReader::new(file.unwrap());
+        let graph: Vec<Vec::<(usize, i32)>> = serde_json::from_reader(file)?;
+        graph
+    };
+
+    // let mut graph2 = vec![Vec::<(usize, i32)>::new(); images.len()];
+    // for i in 0..graph.len() {
+    //     for &(j, score) in &graph[i] {
+    //         graph2[i].push((j, score));
+    //         graph2[j].push((i, score));
+    //     }
+    // }
+    // graph2.iter_mut().for_each(|v| v.sort());
+
+    // let mut out_file = BufWriter::new(File::create("b_graph2.json")?);
+    // let strrr = serde_json::to_string(&graph2)?;
+    // write!(&mut out_file, "{}", &strrr)?;
+
 
     Ok(())
 }
