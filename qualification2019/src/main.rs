@@ -1,47 +1,40 @@
-use lib::*;
 use rand::seq::SliceRandom;
 use threadpool::ThreadPool;
 
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::time::Instant;
 
 use std::fs::File;
 use std::io::BufWriter;
 use std::io::Write;
-use std::write;
 use std::writeln;
 
 use std::io::Read;
 use helpers::red::Red;
 
 use bit_set::BitSet;
-use rand::Rng; // 0.8.5
+use rand::Rng;
 use serde_json;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::init();
-
     // a num H: 2, V: 2
     // b num H: 80000, V: 0
     // c num H: 500, V: 500
     // d num H: 30000, V: 60000
     // e num H: 0, V: 80000
 
-    // a: 2
-    // c: 1764
-    // b: 27501
-    // d: 384525
-    // e: 549197
-    // total 962989
+    // a score: 1
+    // b score: 196740
+    // c score: 1790
+    // d score: 384525
+    // e score: 549197
+    // total 1132253
     let files = [
-        // ("./input/a.txt", "./output/a.txt"),
+        ("./input/a.txt", "./output/a.txt"),
         ("./input/b.txt", "./output/b.txt"),
-        // ("./input/b_cut.txt", "./output/b_cut.txt"),
-        // ("./input/a_all_horiz.txt", "./output/a_all_horiz.txt"),
-        // ("./input/c.txt", "./output/c.txt"),
-        // ("./input/d.txt", "./output/d.txt"),
-        // ("./input/e.txt", "./output/e.txt"),
+        ("./input/c.txt", "./output/c.txt"),
+        ("./input/d.txt", "./output/d.txt"),
+        ("./input/e.txt", "./output/e.txt"),
     ];
 
     let args = std::env::args().collect::<Vec<_>>();
@@ -61,8 +54,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for (in_file, out_file) in files {
                 pool.execute(move || {
                     let timer = Instant::now();
-                    solve_annealing_all_horizontal(in_file, out_file).unwrap();
-                    // solve_B(in_file, out_file).unwrap();
+
+                    match &in_file as &str {
+                        "./input/a.txt" => solve_vector_sets(in_file, out_file).unwrap(),
+                        "./input/b.txt" => solve_annealing_all_horizontal(in_file, out_file).unwrap(),
+                        "./input/c.txt" => solve_vector_sets(in_file, out_file).unwrap(),
+                        "./input/d.txt" => solve_bitsets(in_file, out_file).unwrap(),
+                        "./input/e.txt" => solve_bitsets(in_file, out_file).unwrap(),
+                        _ => panic!("default reached"),
+                    };
+
                     println!("{} time: {}", in_file, timer.elapsed().as_millis());
                 })
             }
@@ -189,13 +190,14 @@ fn outer_join(a: &[u32], b: &[u32]) -> Vec<u32> {
 }
 
 fn solve_annealing_all_horizontal(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let mut input = read_problem(in_file);
-    let mut n_images = input.n_images as usize;
-    let mut all_tags = input.all_tags;
-    let mut images = input.images;
+    let Input { n_images, .. } = read_problem(in_file);
+    let n_images = n_images as usize;
 
+    const REVERSE_SECTIONS: bool = true;
+
+    // Problem B has very sparse graph, so let's read a precomputed one, saves ~2 minutes per run
     let graph = {
-        let file = std::fs::File::open("b_graph2.json".to_string());
+        let file = std::fs::File::open("input/b_graph.json".to_string());
         let file = std::io::BufReader::new(file.unwrap());
         let graph: Vec<Vec::<(usize, i32)>> = serde_json::from_reader(file)?;
         graph
@@ -203,8 +205,8 @@ fn solve_annealing_all_horizontal(in_file: &str, out_file: &str) -> Result<(), B
     let get_score_ids = |id1: usize, id2: usize| {
         graph[id1]
             .iter()
-            .find(|(j, score)| *j == id2)
-            .map(|(j, score)| *score)
+            .find(|(j, _score)| *j == id2)
+            .map(|(_j, score)| *score)
             .unwrap_or_default()
     };
 
@@ -220,14 +222,15 @@ fn solve_annealing_all_horizontal(in_file: &str, out_file: &str) -> Result<(), B
         total_score += get_score_ids(res[i - 1], res[i]) as i64;
     }
 
-    let n_iterations_per_t = 100;
+    let n_iterations_per_t = 25;
     let mut temperature = 10.0;
-    let init_temperature = temperature;
+    let lowest_temperature = 0.001;
     let cooldown = 0.9999999;
+    let deadline_secs = 1200;
 
+    let init_temperature = temperature;
     let time_start = Instant::now();
     let mut last_time_printed = Instant::now();
-    // last_time_printed.elapsed().as_millis()
 
     let mut avg_delta = 0;
     let mut avg_prob = 0.0;
@@ -242,33 +245,45 @@ fn solve_annealing_all_horizontal(in_file: &str, out_file: &str) -> Result<(), B
     let mut max_score_temp = temperature;
 
     let mut total_iterations = 0;
-    while temperature > 0.001 {
+    while temperature > lowest_temperature && time_start.elapsed().as_secs() <= deadline_secs {
+        let next_n_iterations = (n_iterations_per_t as f64 * 100.0 * init_temperature / temperature).sqrt() as i32;
         let (delta, id1, id2) = {
             let mut best_score_swap = (i32::MIN, 0, 0);
-            for _ in 0..n_iterations_per_t {
+            for _ in 0..next_n_iterations {
                 // now choose two images that we swap
                 let mut id1 = rng.gen_range(0, n_images);
                 let mut id2 = rng.gen_range(0, n_images);
                 
-                // totally unnecessary
                 if id1 > id2 {
                     (id1, id2) = (id2, id1);
                 }
-        
+
                 let mut delta_score = 0i32;
-                for (id1, id2) in [(id1, id2), (id2, id1)] {
-                    // when we remove the image from slideshow, we lose scores for 1 or 2 transitions
-                    let curr_slide = res[id1];
-                    let new_curr_slide = res[id2];
+
+                if REVERSE_SECTIONS {
                     if id1 > 0 {
-                        let prev_slide = res[id1 - 1];
-                        delta_score -= get_score_ids(prev_slide, curr_slide) as i32;
-                        delta_score += get_score_ids(prev_slide, new_curr_slide) as i32;
+                        delta_score -= get_score_ids(res[id1 - 1], res[id1]) as i32;
+                        delta_score += get_score_ids(res[id1 - 1], res[id2]) as i32;
                     }
-                    if id1 < n_images - 1 {
-                        let next_slide = res[id1 + 1];
-                        delta_score -= get_score_ids(curr_slide, next_slide) as i32;
-                        delta_score += get_score_ids(new_curr_slide, next_slide) as i32;
+                    if id2 < n_images - 1 {
+                        delta_score -= get_score_ids(res[id2], res[id2 + 1]) as i32;
+                        delta_score += get_score_ids(res[id1], res[id2 + 1]) as i32;
+                    }
+                } else {
+                    for (id1, id2) in [(id1, id2), (id2, id1)] {
+                        // when we remove the image from slideshow, we lose scores for 1 or 2 transitions
+                        let curr_slide = res[id1];
+                        let new_curr_slide = res[id2];
+                        if id1 > 0 {
+                            let prev_slide = res[id1 - 1];
+                            delta_score -= get_score_ids(prev_slide, curr_slide) as i32;
+                            delta_score += get_score_ids(prev_slide, new_curr_slide) as i32;
+                        }
+                        if id1 < n_images - 1 {
+                            let next_slide = res[id1 + 1];
+                            delta_score -= get_score_ids(curr_slide, next_slide) as i32;
+                            delta_score += get_score_ids(new_curr_slide, next_slide) as i32;
+                        }
                     }
                 }
         
@@ -283,16 +298,15 @@ fn solve_annealing_all_horizontal(in_file: &str, out_file: &str) -> Result<(), B
         avg_delta += delta;
         n_delta += 1;
 
-        let mut improper_probs = Vec::new();
-        let mut prob = 1.0 / (1.0 + (-delta as f64 / temperature).exp());
-        if !prob.is_finite() || prob > 1.0 {
-            improper_probs.push(prob);
-            prob = 1.0;
-        }
+        let prob = 1.0 / (1.0 + (-delta as f64 / temperature).exp());
         avg_prob += prob;
         let take = rng.gen_bool(prob);
         if take {
-            res.swap(id1, id2);
+            if REVERSE_SECTIONS {
+                res[id1..=id2].reverse();
+            } else {
+                res.swap(id1, id2);
+            }
             total_score += delta as i64;
         }
 
@@ -309,18 +323,17 @@ fn solve_annealing_all_horizontal(in_file: &str, out_file: &str) -> Result<(), B
         if last_time_printed.elapsed().as_millis() > 100 {
             print!("\x1B[2J\x1B[1;1H"); // clears the console
             println!("Time running: {}, n iterations: {}", time_start.elapsed().as_secs(), total_iterations);
+            println!("Curr n iter: {}", next_n_iterations);
             println!("Avg delta: {}", avg_delta as f64 / n_delta as f64);
             println!("Avg prob: {}", avg_prob as f64 / n_delta as f64);
             println!("max delta: {}, max prob: {}", max_delta, max_prob);
             println!("min delta: {}, min prob: {}", min_delta, min_prob);
-            println!("Init T: {}, cooldown: {}, n_iterations: {}", init_temperature, cooldown, n_iterations_per_t);
+            println!("Init T: {}, cooldown: {}, n_iterations: {}, lowest_temperature {}", init_temperature, cooldown, n_iterations_per_t, lowest_temperature);
             println!("Score: {}", total_score);
-            println!("Delta: {}", delta);
             println!("Temperature: {}", temperature);
-            println!("prob: {}", prob);
             println!("Max score {} at temp {}", max_score, max_score_temp);
-            println!("Improper probs: {:?}", &improper_probs);
             last_time_printed = Instant::now();
+
             avg_delta = 0;
             n_delta = 0;
             avg_prob = 0.0;
@@ -335,54 +348,17 @@ fn solve_annealing_all_horizontal(in_file: &str, out_file: &str) -> Result<(), B
         temperature *= cooldown;
     }
 
-    // println!("score: {}, delta: {}, res: {:?}", score, delta_score, &res);
-
-    Ok(())
-}
-
-fn solve_B(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let mut input = read_problem(in_file);
-    let mut n_images = input.n_images;
-    let mut all_tags = input.all_tags;
-    let mut images = input.images;
-
-    let graph = {
-        let file = std::fs::File::open("b_graph2.json".to_string());
-        let file = std::io::BufReader::new(file.unwrap());
-        let graph: Vec<Vec::<(usize, i32)>> = serde_json::from_reader(file)?;
-        graph
-    };
-
-    let mut rng = rand::thread_rng();
-    // choose seed img
-    let mut res = Vec::with_capacity(images.len());
-    res.push(rng.gen_range(0, images.len()));
-
-    let mut used = vec![false; images.len()];
-    used[res[0]] = true;
-
-    let mut total_score = 0i64;
-    loop {
-        let i = *res.last().unwrap();
-        if let Some(&(j, score)) = graph[i].iter().filter(|(j, score)| !used[*j]).max_by_key(|(j, score)| score) {
-            res.push(j);
-            used[j] = true;
-            total_score += score as i64;
-        } else {
-            break;
-        }
+    let mut out_file = BufWriter::new(File::create(out_file)?);
+    writeln!(&mut out_file, "{}", res.len())?;
+    for id in &res {
+        writeln!(&mut out_file, "{}", id)?;
     }
 
-    println!("score : {}", total_score);
-
     Ok(())
 }
 
-fn solve(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let mut input = read_problem(in_file);
-    let mut n_images = input.n_images;
-    let mut all_tags = input.all_tags;
-    let mut images = input.images;
+fn solve_vector_sets(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let Input { n_images, mut images, .. } = read_problem(in_file);
 
     const NON_EXISTENT_IMG: u32 = u32::MAX;
 
@@ -475,10 +451,20 @@ fn solve(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>
     }
     println!("{} total score: {}", in_file, total_score);
 
+    let mut out_file = BufWriter::new(File::create(out_file)?);
+    writeln!(&mut out_file, "{}", solution.len())?;
+    for &(a, b) in &solution {
+        if b == NON_EXISTENT_IMG {
+            writeln!(&mut out_file, "{}", a)?;
+        } else {
+            writeln!(&mut out_file, "{} {}", a, b)?;   
+        }
+    }
+
     Ok(())
 }
 
-fn solve_bits(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn solve_bitsets(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>> {
     let Input { n_images, all_tags, mut images } = read_problem(in_file);
     
     let use_bitsets = all_tags.len() <= 500;
@@ -576,9 +562,52 @@ fn solve_bits(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::E
     }
     println!("{} total score: {}", in_file, total_score);
 
+    let mut out_file = BufWriter::new(File::create(out_file)?);
+    writeln!(&mut out_file, "{}", solution.len())?;
+    for &(a, b) in &solution {
+        if b == NON_EXISTENT_IMG {
+            writeln!(&mut out_file, "{}", a)?;
+        } else {
+            writeln!(&mut out_file, "{} {}", a, b)?;   
+        }
+    }
+
     Ok(())
 }
 
 fn check(in_file: &str, out_file: &str) -> Result<usize, Box<dyn std::error::Error>> {
-    Ok(0)
+    let Input { mut images, .. } = read_problem(in_file);
+
+    let file = std::fs::File::open(out_file.to_string());
+    let iter = std::io::BufReader::new(file.unwrap())
+        .bytes()
+        .map(Result::unwrap);
+    let mut red = Red::new(iter);
+
+    let mut total_score = 0;
+    let mut prev_tags = Vec::new();
+    let n_slides = red.read::<usize>();
+    let mut id;
+    let mut id2 = usize::MAX;
+    for _ in 0..n_slides {
+        id = red.read::<usize>();
+        assert!(!images[id].used);
+        let mut curr_tags = images[id].tags.clone();
+        if images[id].vert {
+            id2 = red.read::<usize>();
+            assert!(!images[id2].used);
+            curr_tags = outer_join(&curr_tags, &images[id2].tags);
+        }
+
+        total_score += get_score(&prev_tags, &curr_tags);
+
+        prev_tags = curr_tags;
+
+        images[id].used = true;
+        if images[id].vert {
+            images[id2].used = true;
+        }
+    }
+
+    Ok(total_score)
 }
