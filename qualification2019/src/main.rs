@@ -1,9 +1,3 @@
-/**
- * Not my solution, used the code and approach of Errichto, the winner of the contest
- * https://codeforces.com/blog/entry/58118?#comment-417923
- * https://ideone.com/wzBByv
- */
-
 use lib::*;
 use rand::seq::SliceRandom;
 use threadpool::ThreadPool;
@@ -67,8 +61,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for (in_file, out_file) in files {
                 pool.execute(move || {
                     let timer = Instant::now();
-                    // solve_annealing_all_horizontal(in_file, out_file).unwrap();
-                    solve_B(in_file, out_file).unwrap();
+                    solve_annealing_all_horizontal(in_file, out_file).unwrap();
+                    // solve_B(in_file, out_file).unwrap();
                     println!("{} time: {}", in_file, timer.elapsed().as_millis());
                 })
             }
@@ -200,6 +194,20 @@ fn solve_annealing_all_horizontal(in_file: &str, out_file: &str) -> Result<(), B
     let mut all_tags = input.all_tags;
     let mut images = input.images;
 
+    let graph = {
+        let file = std::fs::File::open("b_graph2.json".to_string());
+        let file = std::io::BufReader::new(file.unwrap());
+        let graph: Vec<Vec::<(usize, i32)>> = serde_json::from_reader(file)?;
+        graph
+    };
+    let get_score_ids = |id1: usize, id2: usize| {
+        graph[id1]
+            .iter()
+            .find(|(j, score)| *j == id2)
+            .map(|(j, score)| *score)
+            .unwrap_or_default()
+    };
+
     let mut rng = rand::thread_rng();
 
     // first, generate random permutation of our images — that would be our initial state
@@ -209,15 +217,13 @@ fn solve_annealing_all_horizontal(in_file: &str, out_file: &str) -> Result<(), B
     // now, compute the score for it
     let mut total_score = 0i64;
     for i in 1..res.len() {
-        let prev_slide = &images[res[i - 1]].tags;
-        let curr_slide = &images[res[i]].tags;
-        total_score += get_score(prev_slide, curr_slide) as i64;
+        total_score += get_score_ids(res[i - 1], res[i]) as i64;
     }
 
-    let n_iterations_per_t = 10;
+    let n_iterations_per_t = 100;
     let mut temperature = 10.0;
     let init_temperature = temperature;
-    let cooldown = 0.999999999;
+    let cooldown = 0.9999999;
 
     let time_start = Instant::now();
     let mut last_time_printed = Instant::now();
@@ -252,17 +258,17 @@ fn solve_annealing_all_horizontal(in_file: &str, out_file: &str) -> Result<(), B
                 let mut delta_score = 0i32;
                 for (id1, id2) in [(id1, id2), (id2, id1)] {
                     // when we remove the image from slideshow, we lose scores for 1 or 2 transitions
-                    let curr_slide = &images[res[id1]].tags;
-                    let new_curr_slide = &images[res[id2]].tags;
+                    let curr_slide = res[id1];
+                    let new_curr_slide = res[id2];
                     if id1 > 0 {
-                        let prev_slide = &images[res[id1 - 1]].tags;
-                        delta_score -= get_score(prev_slide, curr_slide) as i32;
-                        delta_score += get_score(prev_slide, new_curr_slide) as i32;
+                        let prev_slide = res[id1 - 1];
+                        delta_score -= get_score_ids(prev_slide, curr_slide) as i32;
+                        delta_score += get_score_ids(prev_slide, new_curr_slide) as i32;
                     }
                     if id1 < n_images - 1 {
-                        let next_slide = &images[res[id1 + 1]].tags;
-                        delta_score -= get_score(curr_slide, next_slide) as i32;
-                        delta_score += get_score(new_curr_slide, next_slide) as i32;
+                        let next_slide = res[id1 + 1];
+                        delta_score -= get_score_ids(curr_slide, next_slide) as i32;
+                        delta_score += get_score_ids(new_curr_slide, next_slide) as i32;
                     }
                 }
         
