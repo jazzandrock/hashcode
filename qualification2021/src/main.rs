@@ -339,10 +339,12 @@ fn solve(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>
     // }
 
     let mut score = 0;
-    for t in 0..duration {
+    for t in 0..=duration {
         for (&intersection, schedule) in res.iter() {
-            // if schedule.is_empty() { continue; }
-            if schedule.is_empty() { panic!(); }
+            if schedule.is_empty() { 
+                // continue;
+                panic!(); 
+            }
 
             let (street, ..) = get_curr_green(t, intersection);
             // println!("{} green at {}", t, &streets[street as usize].name);
