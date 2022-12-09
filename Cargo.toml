@@ -3,7 +3,8 @@ members = [
     "qualification2021",
     "qualification2020",
     "qualification2019",
-    "qualification2018"
+    "qualification2018",
+    "qualification2017",
 ]
 
 [profile.release]
