@@ -41,13 +41,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     */
     /*
         a Final score: 507906
+        b Final score: 1021680
+        c Final score: 499970
         d Final score: 608303
+        total 2637859
     */
     let files = [
-        ("./input/a.txt", "./output/a.txt"),
-        // ("./input/b.txt", "./output/b.txt"), // curr solution works ~12 hours
-        // ("./input/c.txt", "./output/c.txt"), // ~2 hours
-        ("./input/d.txt", "./output/d.txt"),
+        // ("./input/a.txt", "./output/a.txt"),
+        ("./input/b.txt", "./output/b.txt"), // curr solution works ~12 hours 
+        // ("./input/c.txt", "./output/c.txt"), // ~2 hours 
+        // ("./input/d.txt", "./output/d.txt"),
     ];
 
     let args = std::env::args().collect::<Vec<_>>();
@@ -225,54 +228,53 @@ fn solve(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>
     let mut time_last_printed = Instant::now() - std::time::Duration::from_millis(1000);
     let mut total_score = 0i64;
     let mut videos_added = 0;
+
+    let mut capacity_left = server_capacity as i64 * n_cache as i64;
+    let capacity_initial = capacity_left;
+
+    let mut serv_vid_score_table = vec![ vec![ 0i64; n_videos as usize ]; n_cache as usize ];
+    for server in 0..n_cache {
+        // println!("Server: {}", server);
+        for video in 0..n_videos {
+            if server_capacities[server as usize] < video_sizes[video as usize] { continue; }
+
+            let the_reqs = serv_vid_reqs[server as usize].get(&video);
+            if the_reqs.is_none() { continue; }
+            let the_reqs = the_reqs.unwrap();
+
+            let mut server_score = 0i64;
+            for &req_id in the_reqs {
+                let endp_id = reqs[req_id as usize].endpoint_id;
+                if reqs[req_id as usize].vid_id != video { continue; }
+
+                let old_latency = best_request_latency[req_id as usize] as i64;
+                let new_latency = endp_lats[endp_id as usize][&server] as i64;
+                
+                if old_latency <= new_latency { continue; }
+
+                let n_reqs = reqs[req_id as usize].n_requests as i64;
+                let score = (old_latency - new_latency) * n_reqs;
+                server_score += score;
+            }
+
+            server_score /= video_sizes[video as usize] as i64;
+
+
+            serv_vid_score_table[server as usize][video as usize] = server_score;
+        }
+    }
+    
     loop {
         let mut score_serv_vid = (0, -1, -1);
+
         for server in 0..n_cache {
-            // println!("Server: {}", server);
             for video in 0..n_videos {
                 if server_capacities[server as usize] < video_sizes[video as usize] { continue; }
-
-                let the_reqs = serv_vid_reqs[server as usize].get(&video);
-                if the_reqs.is_none() { continue; }
-                let the_reqs = the_reqs.unwrap();
-
-                let mut server_score = 0i64;
-                for &req_id in the_reqs {
-                    let endp_id = reqs[req_id as usize].endpoint_id;
-                    if reqs[req_id as usize].vid_id != video { continue; }
-
-                    let old_latency = best_request_latency[req_id as usize] as i64;
-                    let new_latency = endp_lats[endp_id as usize][&server] as i64;
-                    
-                    if old_latency <= new_latency { continue; }
-
-                    let n_reqs = reqs[req_id as usize].n_requests as i64;
-                    let score = (old_latency - new_latency) * n_reqs;
-                    server_score += score;
-                }
-
-                // for &endp_id in &server_endpoints[server as usize] {
-                //     for &req_id in &endp_reqs[endp_id as usize] {
-                //         if reqs[req_id as usize].vid_id != video { continue; }
-
-                //         let old_latency = best_request_latency[req_id as usize] as i64;
-                //         let new_latency = endp_lats[endp_id as usize][&server] as i64;
-                        
-                //         if old_latency <= new_latency { continue; }
-
-                //         let n_reqs = reqs[req_id as usize].n_requests as i64;
-                //         let score = (old_latency - new_latency) * n_reqs;
-                //         server_score += score;
-                //     }
-                // }
-
-                server_score /= video_sizes[video as usize] as i64;
-
+    
+                let server_score = serv_vid_score_table[server as usize][video as usize];
                 score_serv_vid = std::cmp::max(score_serv_vid, (server_score, server, video));
             }
         }
-        
-        // println!("Here");
 
         let (score, server, video) = score_serv_vid;
         if server == -1 { break; }
@@ -298,17 +300,53 @@ fn solve(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>
 
         videos_added += 1;
 
+        capacity_left -= video_sizes[video as usize] as i64;
+
         if time_last_printed.elapsed().as_millis() > 500 {
-            // print!("\x1B[2J\x1B[1;1H"); // clears the console
-            // println!("Total score: {}", total_score);
+            print!("\x1B[2J\x1B[1;1H"); // clears the console
+            println!("Total score: {}", total_score);
+            println!("{} Capacity left: {} / {}", in_file, capacity_left, capacity_initial);
             println!("Videos added: {} / {}, time: {}", videos_added, n_videos, start_time.elapsed().as_secs());
 
             time_last_printed = Instant::now();
         }
+
+        for server in 0..n_cache {
+            // println!("Server: {}", server);
+            // for video in 0..n_videos {
+                if server_capacities[server as usize] < video_sizes[video as usize] { continue; }
+    
+                let the_reqs = serv_vid_reqs[server as usize].get(&video);
+                if the_reqs.is_none() { continue; }
+                let the_reqs = the_reqs.unwrap();
+    
+                let mut server_score = 0i64;
+                for &req_id in the_reqs {
+                    let endp_id = reqs[req_id as usize].endpoint_id;
+                    if reqs[req_id as usize].vid_id != video { continue; }
+    
+                    let old_latency = best_request_latency[req_id as usize] as i64;
+                    let new_latency = endp_lats[endp_id as usize][&server] as i64;
+                    
+                    if old_latency <= new_latency { continue; }
+    
+                    let n_reqs = reqs[req_id as usize].n_requests as i64;
+                    let score = (old_latency - new_latency) * n_reqs;
+                    server_score += score;
+                }
+    
+                server_score /= video_sizes[video as usize] as i64;
+    
+    
+                serv_vid_score_table[server as usize][video as usize] = server_score;
+            // }
+        }
+    
     }
 
     // print!("\x1B[2J\x1B[1;1H"); // clears the console
     println!("{} Total score: {}", in_file, total_score);
+    println!("{} Capacity left: {} / {}", in_file, capacity_left, capacity_initial);
     println!("{} Videos added: {} / {}", in_file, videos_added, n_videos);
 
     time_last_printed = Instant::now();
@@ -341,6 +379,8 @@ fn solve(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>
     }
     let final_score = score * 1000 / reqs.iter().map(|r| r.n_requests as i64).sum::<i64>();
     println!("Final score: {}", final_score);
+
+    
 
     Ok(())
 }
