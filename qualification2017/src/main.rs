@@ -1,8 +1,10 @@
+use std::str::FromStr;
 use threadpool::ThreadPool;
 
 use std::collections::BinaryHeap;
 use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::io::BufRead;
 use std::time::Instant;
 
 use std::fs::File;
@@ -15,6 +17,8 @@ use helpers::red::Red;
 
 use rand::Rng;
 use serde_json;
+
+
 
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -47,10 +51,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         total 2637859
     */
     let files = [
-        // ("./input/a.txt", "./output/a.txt"),
-        ("./input/b.txt", "./output/b.txt"), // curr solution works ~12 hours 
-        // ("./input/c.txt", "./output/c.txt"), // ~2 hours 
-        // ("./input/d.txt", "./output/d.txt"),
+        ("./input/a.txt", "./output/a.txt"),
+        ("./input/b.txt", "./output/b.txt"),
+        ("./input/c.txt", "./output/c.txt"),
+        ("./input/d.txt", "./output/d.txt"),
     ];
 
     let args = std::env::args().collect::<Vec<_>>();
@@ -62,11 +66,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{} score: {}", in_file, score);
                 scores.push(score);
             }
-            println!("total {:?}", &scores.iter().sum::<usize>());
+            println!("total {:?}", &scores.iter().sum::<i64>());
         }
         Some("solve") => {
             let timer = Instant::now();
-            // let pool = ThreadPool::new(files.len());
+            let pool = ThreadPool::new(files.len());
             for (in_file, out_file) in files {
                 let closure = move || {
                     let timer = Instant::now();
@@ -81,10 +85,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     println!("{} time: {}", in_file, timer.elapsed().as_millis());
                 };
-                closure();
-                // pool.execute(closure);
+                const MULTI_THREAD: bool = false;
+                if MULTI_THREAD {
+                    pool.execute(closure);
+                } else {
+                    closure();
+                }
             }
-            // pool.join();
+            pool.join();
             println!("total time: {}", timer.elapsed().as_millis());
         }
         _ => panic!("pass either check or solve"),
@@ -93,36 +101,107 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+struct Req {
+    vid_id: i32,
+    endpoint_id: i32, 
+    n_requests: i32,
+}
 
-fn solve(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>> {
+struct Input {
+    n_videos: i32,
+    n_endpoints: i32,
+    n_req_desc: i32,
+    n_servers: i32,
+    server_capacity: i32,
+
+    video_sizes: Vec<i32>,
+    server_endpoints: Vec<Vec<i32>>,
+    endpoint_servers: Vec<Vec<i32>>,
+
+    endp_lats: Vec<HashMap<i32, i32>>,
+
+    reqs: Vec<Req>,
+
+    endp_reqs: Vec<Vec<i32>>,
+}
+
+const DC_ID: i32 = -1; // ID of datacenter
+
+fn read_problem(in_file: &str) -> Input {
     let file = std::fs::File::open(in_file.to_string());
     let iter = std::io::BufReader::new(file.unwrap())
         .bytes()
         .map(Result::unwrap);
     let mut red = Red::new(iter);
-    /*
-        I need: fill each server with the best set of videos.
-        What if I make a vec of "best latency for request"
-        And also a vec "Possible savings for server for video"
-        So it's a map savings_map server -> video -> savings 
-        We fill it: for each request, for each server that the endpoint is connected to,
-        we put server -> video += dc_latency - server_latency * n_requests
 
-        then, we find the biggest saving, and put the video in the server
+    let n_videos = red.read::<i32>();
+    let n_endpoints = red.read::<i32>();
+    let n_req_desc = red.read::<i32>();
+    let n_servers = red.read::<i32>();  
+    let server_capacity = red.read::<i32>();  
 
-        obviously, after we put the video in server, potential savings change.
-        For that server -> video, it's zero
+    let video_sizes = red.read_vec::<i32>(n_videos as usize);
 
-        new map video_requests_map: video -> server -> requests for the video connected to the server
-        for each request of that video that is connected to that server,
-        do: savings_map[server][video] -= (current best latency - new best latency) * n_requests
+    // which endpoints are connected to the server
+    let mut server_endpoints = vec![vec![]; n_servers as usize];
+    // which servers are connected to the endpoint
+    let mut endpoint_servers = vec![vec![]; n_endpoints as usize];
 
-        new map best_latency_request = dc for all
+    // endpoint id -> server id -> latency
+    let mut endp_lats = vec![HashMap::<i32, i32>::new(); n_endpoints as usize];
 
-        // let's also make another map: cache_server -> video -> requests
+    for i in 0..n_endpoints {
+        let latency_datacenter = red.read::<i32>();
+        let n_server_connected = red.read::<i32>();
 
-    */
+        endp_lats[i as usize].insert(DC_ID, latency_datacenter);
 
+        for _ in 0..n_server_connected {
+            let server_id = red.read::<i32>();
+            let latency_server = red.read::<i32>();
+
+            server_endpoints[server_id as usize].push(i);
+            endpoint_servers[i as usize].push(server_id);
+
+            endp_lats[i as usize].insert(server_id, latency_server);
+        }
+    }
+
+    let mut reqs: Vec<Req> = Vec::with_capacity(n_req_desc as usize);
+    let mut endp_reqs = vec![vec![]; n_endpoints as usize];
+    for i in 0..n_req_desc {
+        let vid_id = red.read::<i32>();
+        let endpoint_id = red.read::<i32>();
+        let n_requests = red.read::<i32>();
+        reqs.push(Req {
+            vid_id, 
+            endpoint_id,
+            n_requests
+        });
+
+        endp_reqs[endpoint_id as usize].push(i);
+    }
+
+    Input {
+        n_videos,
+        n_endpoints,
+        n_req_desc,
+        n_servers,
+        server_capacity,
+    
+        video_sizes,
+        server_endpoints,
+        endpoint_servers,
+
+        endp_lats,
+
+        reqs,
+    
+        endp_reqs,
+    }
+}
+
+fn solve(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>> {
     /*
         new map best_request_latency: request -> best latency for request (fill out with latency to DC)
 
@@ -140,101 +219,46 @@ fn solve(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>
             for each video that has a connection to that server
                 consider(server, video)
         when found the best score, add this video to the server
-
-
     */
 
-    // println!("Start");
     let start_time = Instant::now();
-    // std::thread::sleep( std::time::Duration::from_secs(10));
-    // println!("working on reading @ {}", start_time.elapsed().as_millis());
-    let n_videos = red.read::<i32>();
-    let n_endpoints = red.read::<i32>();
-    let n_req_desc = red.read::<i32>();
-    let n_cache = red.read::<i32>();  
-    let server_capacity = red.read::<i32>();  
 
-    let video_sizes = red.read_vec::<i32>(n_videos as usize);
+    let Input {
+        n_videos,
+        n_endpoints,
+        n_req_desc,
+        n_servers,
+        server_capacity,
+    
+        video_sizes,
+        server_endpoints,
+        endpoint_servers,
 
-    let mut server_endpoints = vec![vec![]; n_cache as usize];
-    let mut endpoint_servers = vec![vec![]; n_endpoints as usize];
-    let mut server_capacities = vec![server_capacity; n_cache as usize];
+        endp_lats,
 
-    const DC_ID: i32 = -1;
+        reqs,
+    
+        endp_reqs,
+    } = read_problem(in_file);
 
-    let mut endp_lats = vec![HashMap::<i32, i32>::new(); n_endpoints as usize];
-
-    for i in 0..n_endpoints {
-        let latency_datacenter = red.read::<i32>();
-        let n_cache_connected = red.read::<i32>();
-
-        endp_lats[i as usize].insert(DC_ID, latency_datacenter);
-
-        for _ in 0..n_cache_connected {
-            let cache_id = red.read::<i32>();
-            let latency_cache = red.read::<i32>();
-
-            server_endpoints[cache_id as usize].push(i);
-            endpoint_servers[i as usize].push(cache_id);
-
-            endp_lats[i as usize].insert(cache_id, latency_cache);
-        }
-    }
-
-    struct Req {
-        vid_id: i32,
-        endpoint_id: i32, 
-        n_requests: i32,
-    }
 
     // this data structure takes 800 MB
     // server -> video -> list of requests
-    let mut serv_vid_reqs: Vec<HashMap<i32, Vec<i32>>> = vec![HashMap::new(); n_cache as usize];
-
-
-    let mut reqs = Vec::with_capacity(n_req_desc as usize);
-    let mut best_request_latency = vec![-1; n_req_desc as usize];
-    let mut endp_reqs = vec![vec![]; n_endpoints as usize];
-    for i in 0..n_req_desc {
-        let vid_id = red.read::<i32>();
-        let endpoint_id = red.read::<i32>();
-        let n_requests = red.read::<i32>();
-        reqs.push(Req {
-            vid_id, 
-            endpoint_id,
-            n_requests
-        });
-
-        best_request_latency[i as usize] = endp_lats[endpoint_id as usize][&DC_ID];
-        endp_reqs[endpoint_id as usize].push(i);
-        // takes 800 MB
-        for &serv in &endpoint_servers[endpoint_id as usize] {
-            serv_vid_reqs[serv as usize].entry(vid_id).or_default().push(i);
+    let mut serv_vid_reqs: Vec<HashMap<i32, Vec<i32>>> = vec![HashMap::new(); n_servers as usize];
+    for (i, req) in reqs.iter().enumerate() {
+        for &serv in &endpoint_servers[req.endpoint_id as usize] {
+            serv_vid_reqs[serv as usize].entry(req.vid_id).or_default().push(i as i32);
         }
     }
 
-    // fn consider(server, video) -> how much latency we save
-    // for each endpoint connected to the server
-    //     for each request for that endpoint
-    //         that is for the video
-    //             sum(best_request_latency[request] - new latency * n_requests)
-
-    let server_endpoints = server_endpoints;
-    let endpoint_servers = endpoint_servers;
-
-    let mut answer = vec![vec![]; n_cache as usize];
-
-
-    let mut time_last_printed = Instant::now() - std::time::Duration::from_millis(1000);
-    let mut total_score = 0i64;
-    let mut videos_added = 0;
-
-    let mut capacity_left = server_capacity as i64 * n_cache as i64;
-    let capacity_initial = capacity_left;
-
-    let mut serv_vid_score_table = vec![ vec![ 0i64; n_videos as usize ]; n_cache as usize ];
-    for server in 0..n_cache {
-        // println!("Server: {}", server);
+    let mut best_request_latency = vec![-1; n_req_desc as usize];
+    for i in 0..n_req_desc as usize {
+        let endpoint_id = reqs[i].endpoint_id;
+        best_request_latency[i] = endp_lats[endpoint_id as usize][&DC_ID];
+    }
+    let mut server_capacities = vec![server_capacity; n_servers as usize];
+    let mut serv_vid_score_table = vec![ vec![ 0i64; n_videos as usize ]; n_servers as usize ];
+    for server in 0..n_servers {
         for video in 0..n_videos {
             if server_capacities[server as usize] < video_sizes[video as usize] { continue; }
 
@@ -263,11 +287,17 @@ fn solve(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>
             serv_vid_score_table[server as usize][video as usize] = server_score;
         }
     }
+
     
+    let mut answer = vec![vec![]; n_servers as usize]; // the videos we put in each server
+    let mut time_last_printed = Instant::now() - std::time::Duration::from_millis(1000);
+    let mut total_score = 0i64; // not normalized (not divided by total n requests and stuff)
+    let mut capacity_left = server_capacity as i64 * n_servers as i64;
+    let capacity_initial = capacity_left;
     loop {
         let mut score_serv_vid = (0, -1, -1);
 
-        for server in 0..n_cache {
+        for server in 0..n_servers {
             for video in 0..n_videos {
                 if server_capacities[server as usize] < video_sizes[video as usize] { continue; }
     
@@ -298,65 +328,96 @@ fn solve(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>
 
         total_score += score;
 
-        videos_added += 1;
-
         capacity_left -= video_sizes[video as usize] as i64;
 
         if time_last_printed.elapsed().as_millis() > 500 {
             print!("\x1B[2J\x1B[1;1H"); // clears the console
-            println!("Total score: {}", total_score);
+            println!("{} Total score: {}", in_file, total_score);
             println!("{} Capacity left: {} / {}", in_file, capacity_left, capacity_initial);
-            println!("Videos added: {} / {}, time: {}", videos_added, n_videos, start_time.elapsed().as_secs());
 
             time_last_printed = Instant::now();
         }
 
-        for server in 0..n_cache {
-            // println!("Server: {}", server);
-            // for video in 0..n_videos {
-                if server_capacities[server as usize] < video_sizes[video as usize] { continue; }
-    
-                let the_reqs = serv_vid_reqs[server as usize].get(&video);
-                if the_reqs.is_none() { continue; }
-                let the_reqs = the_reqs.unwrap();
-    
-                let mut server_score = 0i64;
-                for &req_id in the_reqs {
-                    let endp_id = reqs[req_id as usize].endpoint_id;
-                    if reqs[req_id as usize].vid_id != video { continue; }
-    
-                    let old_latency = best_request_latency[req_id as usize] as i64;
-                    let new_latency = endp_lats[endp_id as usize][&server] as i64;
-                    
-                    if old_latency <= new_latency { continue; }
-    
-                    let n_reqs = reqs[req_id as usize].n_requests as i64;
-                    let score = (old_latency - new_latency) * n_reqs;
-                    server_score += score;
-                }
-    
-                server_score /= video_sizes[video as usize] as i64;
-    
-    
-                serv_vid_score_table[server as usize][video as usize] = server_score;
-            // }
+        for server in 0..n_servers {
+            if server_capacities[server as usize] < video_sizes[video as usize] { continue; }
+
+            let the_reqs = serv_vid_reqs[server as usize].get(&video);
+            if the_reqs.is_none() { continue; }
+            let the_reqs = the_reqs.unwrap();
+
+            let mut server_score = 0i64;
+            for &req_id in the_reqs {
+                let endp_id = reqs[req_id as usize].endpoint_id;
+                if reqs[req_id as usize].vid_id != video { continue; }
+
+                let old_latency = best_request_latency[req_id as usize] as i64;
+                let new_latency = endp_lats[endp_id as usize][&server] as i64;
+                
+                if old_latency <= new_latency { continue; }
+
+                let n_reqs = reqs[req_id as usize].n_requests as i64;
+                let score = (old_latency - new_latency) * n_reqs;
+                server_score += score;
+            }
+
+            server_score /= video_sizes[video as usize] as i64;
+
+            serv_vid_score_table[server as usize][video as usize] = server_score;
         }
-    
     }
 
-    // print!("\x1B[2J\x1B[1;1H"); // clears the console
-    println!("{} Total score: {}", in_file, total_score);
-    println!("{} Capacity left: {} / {}", in_file, capacity_left, capacity_initial);
-    println!("{} Videos added: {} / {}", in_file, videos_added, n_videos);
+    let mut out_file = BufWriter::new(File::create(out_file)?);
+    writeln!(&mut out_file, "{}", answer.iter().filter(|v| !v.is_empty()).count())?;
+    for i in 0..answer.len() {
+        if answer[i].is_empty() { continue; }
+        write!(&mut out_file, "{}", i)?;
+        for &j in &answer[i] {
+            write!(&mut out_file, " {}", j)?;
+        }
+        writeln!(&mut out_file)?;
+    }
 
-    time_last_printed = Instant::now();
+    Ok(())
+}
 
-    // println!("finished working on reading @ {}", start_time.elapsed().as_millis());
-    // std::thread::sleep( std::time::Duration::from_secs(50));
-    // println!("finished @ {}", start_time.elapsed().as_millis());
+fn check(in_file: &str, out_file: &str) -> Result<i64, Box<dyn std::error::Error>> {
+    let Input {
+        n_videos,
+        n_endpoints,
+        n_req_desc,
+        n_servers,
+        server_capacity,
+    
+        video_sizes,
+        server_endpoints,
+        endpoint_servers,
+
+        endp_lats,
+    
+        reqs,
+    
+        endp_reqs,
+    } = read_problem(in_file);
+
+    let mut answer = vec![vec![]; n_servers as usize]; // the videos we put in each server
+    
+    let file = std::fs::File::open(out_file.to_string());
+    let mut reader = std::io::BufReader::new(file.unwrap());
+    let mut buf = String::with_capacity(100000);
+    reader.read_line(&mut buf)?;
+    let n_cache_descr = buf.split_whitespace().map(usize::from_str).collect::<Result<Vec<_>, _>>()?[0];
+
+    for _ in 0..n_cache_descr {
+        buf.clear();
+        reader.read_line(&mut buf)?;
+        let vec = buf.split_whitespace().map(i32::from_str).collect::<Result<Vec<_>, _>>()?;
+        for i in 1..vec.len() {
+            answer[vec[0] as usize].push(vec[i]);
+        }
+    }
 
     let mut max_space_left = -1;
-    for server_id in 0..n_cache as usize {
+    for server_id in 0..n_servers as usize {
         let mut size = 0;
         for &video_id in &answer[server_id] {
             size += video_sizes[video_id as usize];
@@ -380,11 +441,5 @@ fn solve(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>
     let final_score = score * 1000 / reqs.iter().map(|r| r.n_requests as i64).sum::<i64>();
     println!("Final score: {}", final_score);
 
-    
-
-    Ok(())
-}
-
-fn check(in_file: &str, out_file: &str) -> Result<usize, Box<dyn std::error::Error>> {
-    Ok(0)
+    Ok(final_score)
 }
