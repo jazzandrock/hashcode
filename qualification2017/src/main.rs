@@ -1,9 +1,7 @@
 use std::str::FromStr;
 use threadpool::ThreadPool;
 
-use std::collections::BinaryHeap;
 use std::collections::HashMap;
-use std::collections::VecDeque;
 use std::io::BufRead;
 use std::time::Instant;
 
@@ -14,11 +12,6 @@ use std::writeln;
 
 use std::io::Read;
 use helpers::red::Red;
-
-use rand::Rng;
-use serde_json;
-
-
 
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -74,15 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for (in_file, out_file) in files {
                 let closure = move || {
                     let timer = Instant::now();
-
-                    match &in_file as &str {
-                        "./input/a.txt" => solve(in_file, out_file).unwrap(),
-                        "./input/b.txt" => solve(in_file, out_file).unwrap(),
-                        "./input/c.txt" => solve(in_file, out_file).unwrap(),
-                        "./input/d.txt" => solve(in_file, out_file).unwrap(),
-                        _ => panic!("default reached"),
-                    };
-
+                    solve(in_file, out_file).unwrap();
                     println!("{} time: {}", in_file, timer.elapsed().as_millis());
                 };
                 const MULTI_THREAD: bool = false;
@@ -109,7 +94,7 @@ struct Req {
 
 struct Input {
     n_videos: i32,
-    n_endpoints: i32,
+    _n_endpoints: i32,
     n_req_desc: i32,
     n_servers: i32,
     server_capacity: i32,
@@ -184,7 +169,7 @@ fn read_problem(in_file: &str) -> Input {
 
     Input {
         n_videos,
-        n_endpoints,
+        _n_endpoints: n_endpoints,
         n_req_desc,
         n_servers,
         server_capacity,
@@ -221,11 +206,8 @@ fn solve(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>
         when found the best score, add this video to the server
     */
 
-    let start_time = Instant::now();
-
     let Input {
         n_videos,
-        n_endpoints,
         n_req_desc,
         n_servers,
         server_capacity,
@@ -239,6 +221,7 @@ fn solve(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>
         reqs,
     
         endp_reqs,
+        ..
     } = read_problem(in_file);
 
 
@@ -382,21 +365,16 @@ fn solve(in_file: &str, out_file: &str) -> Result<(), Box<dyn std::error::Error>
 
 fn check(in_file: &str, out_file: &str) -> Result<i64, Box<dyn std::error::Error>> {
     let Input {
-        n_videos,
-        n_endpoints,
-        n_req_desc,
         n_servers,
         server_capacity,
     
         video_sizes,
-        server_endpoints,
-        endpoint_servers,
 
         endp_lats,
     
         reqs,
-    
-        endp_reqs,
+
+        ..
     } = read_problem(in_file);
 
     let mut answer = vec![vec![]; n_servers as usize]; // the videos we put in each server
